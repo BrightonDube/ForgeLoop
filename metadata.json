@@ -1,0 +1,5 @@
+{
+  "name": "Code-Ocean Navigator",
+  "description": "Autonomous AI Agent Dashboard for visualizing the Observe-Reason-Act-Verify loop of the Code-Ocean Navigator system.",
+  "requestFramePermissions": []
+}
