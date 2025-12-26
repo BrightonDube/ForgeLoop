@@ -10,9 +10,9 @@ const DEMO_REPO = "github.com/demo/broken-app";
 
 // --- The Brain (Gemini Client) ---
 const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
+  const apiKey = import.meta.env.VITE_API_KEY;
   if (!apiKey) return null;
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI(apiKey);
 };
 
 // --- Agent Worker Class ---
@@ -279,13 +279,11 @@ export class AgentWorker {
       `;
 
       try {
-        const response = await this.ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: `Code Context:\n${fileContext}\n\nTask:\n${prompt}`
-        });
+        const model = this.ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const response = await model.generateContent(`Code Context:\n${fileContext}\n\nTask:\n${prompt}`);
         
-        const text = response.text || "";
-        const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        const text = response.response.text();
+        const cleanJson = text.replace(//g, '').replace(//g, '').trim();
         return JSON.parse(cleanJson);
       } catch (e) {
           console.error("Failed to detect issues via AI", e);
@@ -297,16 +295,12 @@ export class AgentWorker {
       if (!this.ai || !base64Data) return "Simulated Analysis: Visual layout appears correct.";
 
       try {
-          const response = await this.ai.models.generateContent({
-              model: 'gemini-3-flash-preview', // Or gemini-pro-vision if available in this env
-              contents: {
-                  parts: [
-                      { inlineData: { mimeType: 'image/png', data: base64Data } },
-                      { text: prompt }
-                  ]
-              }
-          });
-          return response.text || "No analysis returned.";
+          const model = this.ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const response = await model.generateContent([
+              prompt,
+              { inlineData: { mimeType: 'image/png', data: base64Data } }
+          ]);
+          return response.response.text() || "No analysis returned.";
       } catch (e) {
           console.warn("Vision analysis failed (likely API key or model support)", e);
           return "Simulated Analysis: Visual layout appears correct.";
@@ -369,11 +363,9 @@ export class AgentWorker {
     if (!this.ai) return fallback;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `You are an AI software engineer. Context: ${context}. Task: ${prompt}. Output a single concise log line (max 20 words).`,
-      });
-      return response.text || fallback;
+      const model = this.ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const response = await model.generateContent(`You are an AI software engineer. Context: ${context}. Task: ${prompt}. Output a single concise log line (max 20 words).`);
+      return response.response.text() || fallback;
     } catch (e) {
       console.warn("Gemini generation failed, using fallback", e);
       return fallback;
