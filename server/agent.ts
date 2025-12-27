@@ -1,3 +1,4 @@
+import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./db";
 import { Sandbox } from "./sandbox";
@@ -19,7 +20,7 @@ const getAiClient = () => {
 export class AgentWorker {
   private runId: string;
   private isRunning: boolean = false;
-  private timer: number | null = null;
+  private timer: any = null;
   private ai: GoogleGenAI | null;
   private sandbox: Sandbox;
   private vision: VisionSystem;
@@ -88,7 +89,7 @@ export class AgentWorker {
     }
 
     if (this.isRunning) {
-      this.timer = window.setTimeout(() => this.executeLoop(), 100);
+      this.timer = setTimeout(() => this.executeLoop(), 100);
     }
   }
 
@@ -285,7 +286,7 @@ export class AgentWorker {
         });
         
         const text = response.text || "";
-        const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        const cleanJson = text.replace(//g, '').replace(//g, '').trim();
         return JSON.parse(cleanJson);
       } catch (e) {
           console.error("Failed to detect issues via AI", e);
@@ -346,7 +347,7 @@ export class AgentWorker {
     const level = typeof delayOrLevel === 'string' ? delayOrLevel : LogLevel.INFO;
 
     if (delay > 0) {
-        await new Promise(r => this.timer = window.setTimeout(r, delay));
+        await new Promise(r => this.timer = setTimeout(r, delay));
     }
 
     this.log(subsystem, message, level);
