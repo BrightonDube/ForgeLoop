@@ -1,205 +1,123 @@
 import { db } from './db';
 import { RepoFile, ExecutionResult } from '../types';
+import { GoogleGenAI } from "@google/genai";
 
 /**
  * The Sandbox acts as the isolated execution environment ("The Hands").
- * It interacts with the virtual file system in the DB and simulates shell commands.
+ * 
+ * UPGRADE: This now uses an LLM-based Shell Emulator. 
+ * Instead of hardcoded strings, it feeds the virtual filesystem to Gemini
+ * and asks "What would the output be?"
  */
 export class Sandbox {
   private runId: string;
-  private processes: Set<string> = new Set();
+  private ai: GoogleGenAI | null;
 
   constructor(runId: string) {
     this.runId = runId;
+    const apiKey = process.env.API_KEY;
+    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
   }
 
   /**
-   * Executes a shell command in the sandbox.
+   * Executes a shell command using Generative AI to simulate the OS kernel.
    */
   public async execute(command: string): Promise<ExecutionResult> {
     const start = Date.now();
-    let exitCode = 0;
-    let stdout = '';
-    let stderr = '';
+    
+    // 1. Context Loading
+    // We pass the file names and structure. For critical commands like 'test', we pass content.
+    const files = db.getFiles(this.runId);
+    const fileStructure = files.map(f => f.path).join('\n');
+    
+    // For specific commands, we need file content to give accurate output
+    const isTest = command.includes('test') || command.includes('lint') || command.includes('cat');
+    const isGit = command.includes('git');
+    
+    let context = `Current Working Directory: /app\nFiles:\n${fileStructure}`;
+    
+    if (isTest) {
+        // limit content context to avoid token limits, prioritize source and tests
+        const relevantContent = files
+            .filter(f => f.path.match(/\.(ts|tsx|js|test|spec)/))
+            .map(f => `--- ${f.path} ---\n${f.content}`)
+            .join('\n');
+        context += `\n\nFile Contents:\n${relevantContent}`;
+    }
 
-    // Simulate network/disk latency
-    await new Promise(r => setTimeout(r, Math.random() * 500 + 200));
-
-    const parts = command.trim().split(/\s+/);
-    const cmd = parts[0];
-    const args = parts.slice(1);
+    if (!this.ai) {
+        return {
+            command,
+            exitCode: 1,
+            stdout: "",
+            stderr: "Sandbox Error: AI Core offline. Cannot simulate shell execution.",
+            durationMs: 0
+        };
+    }
 
     try {
-      switch (cmd) {
-        case 'npm':
-          const npmResult = await this.handleNpm(args);
-          exitCode = npmResult.exitCode;
-          stdout = npmResult.stdout;
-          stderr = npmResult.stderr;
-          break;
+        // 2. The Shell Emulator Prompt
+        const prompt = `
+            You are a Linux Shell Emulator (Bash).
+            
+            Context:
+            ${context}
+            
+            User Command: $ ${command}
+            
+            Instructions:
+            1. Simulate the execution of this command based strictly on the files provided.
+            2. If the command checks for specific code (like 'grep' or 'npm test'), analyze the provided FILE CONTENTS to determine success or failure.
+            3. Do NOT explain what you are doing. Output ONLY the raw stdout and stderr.
+            4. If the command fails (e.g. test failure, syntax error), start the output with [EXIT_CODE:1]. If success, start with [EXIT_CODE:0].
+            
+            Example Output:
+            [EXIT_CODE:0]
+            src  package.json  README.md
+        `;
 
-        case 'ls':
-          stdout = this.handleLs(args);
-          break;
+        const result = await this.ai.models.generateContent({
+            model: 'gemini-3-flash-preview', // Speed is key for shell emulation
+            contents: prompt,
+            config: {
+                temperature: 0.2 // Low temperature for deterministic shell behavior
+            }
+        });
 
-        case 'cat':
-          stdout = this.handleCat(args);
-          break;
+        const rawOutput = result.text || "";
         
-        case 'git':
-          const gitResult = this.handleGit(args);
-          stdout = gitResult.stdout;
-          break;
+        // Parse the Hallucinated Shell Output
+        let exitCode = 0;
+        let output = rawOutput;
 
-        default:
-          exitCode = 127;
-          stderr = `bash: ${cmd}: command not found`;
-      }
+        if (rawOutput.includes('[EXIT_CODE:1]')) {
+            exitCode = 1;
+            output = rawOutput.replace('[EXIT_CODE:1]', '').trim();
+        } else if (rawOutput.includes('[EXIT_CODE:0]')) {
+            exitCode = 0;
+            output = rawOutput.replace('[EXIT_CODE:0]', '').trim();
+        }
+
+        // Split standard out/err roughly (simple heuristic)
+        const stderr = exitCode !== 0 ? output : "";
+        const stdout = exitCode === 0 ? output : "";
+
+        return {
+            command,
+            exitCode,
+            stdout,
+            stderr,
+            durationMs: Date.now() - start
+        };
+
     } catch (e: any) {
-      exitCode = 1;
-      stderr = e.message || 'Unknown execution error';
+        return {
+            command,
+            exitCode: 1,
+            stdout: "",
+            stderr: `Shell Crash: ${e.message}`,
+            durationMs: Date.now() - start
+        };
     }
-
-    // Artificial delay for heavier commands
-    if (cmd === 'npm' && (args.includes('install') || args.includes('ci'))) {
-       await new Promise(r => setTimeout(r, 1500));
-    }
-
-    return {
-      command,
-      exitCode,
-      stdout,
-      stderr,
-      durationMs: Date.now() - start
-    };
-  }
-
-  // --- Command Handlers ---
-
-  private async handleNpm(args: string[]): Promise<{ exitCode: number, stdout: string, stderr: string }> {
-    const sub = args[0];
-
-    if (sub === 'install' || sub === 'ci') {
-      return {
-        exitCode: 0,
-        stdout: `
-added 842 packages, and audited 843 packages in 2s
-
-104 packages are looking for funding
-  run \`npm fund\` for details
-
-found 0 vulnerabilities`,
-        stderr: ''
-      };
-    }
-
-    if (sub === 'run' && args[1] === 'dev') {
-      this.processes.add('dev-server');
-      return {
-        exitCode: 0,
-        stdout: `
-> demo-app@1.0.0 dev
-> next dev
-
-ready - started server on 0.0.0.0:3000, url: http://localhost:3000
-event - compiled client and server successfully in 1241 ms (156 modules)
-wait  - compiling...
-event - compiled successfully
-`,
-        stderr: ''
-      };
-    }
-
-    if (sub === 'test') {
-      return this.runTests();
-    }
-
-    return { exitCode: 1, stdout: '', stderr: `npm ERR! Unknown command: ${sub}` };
-  }
-
-  private runTests(): { exitCode: number, stdout: string, stderr: string } {
-    // Heuristic: Check if the bug is fixed in the virtual filesystem
-    const files = db.getFiles(this.runId);
-    const headerFile = files.find(f => f.path === 'src/components/Header.tsx');
-    
-    if (!headerFile) {
-        return { exitCode: 1, stdout: '', stderr: 'FAIL: src/components/Header.tsx not found' };
-    }
-
-    // The test logic: Check for z-index
-    const hasFix = headerFile.content.includes('z-50') || headerFile.content.includes('z-index');
-
-    if (hasFix) {
-      return {
-        exitCode: 0,
-        stdout: `
-PASS src/components/Header.test.tsx
-  Header Component
-    ✓ should render logo (12 ms)
-    ✓ should contain sign up button (5 ms)
-    ✓ should be positioned above Hero (8 ms)
-
-Test Suites: 1 passed, 1 total
-Tests:       3 passed, 3 total
-Snapshots:   0 total
-Time:        1.245 s
-`,
-        stderr: ''
-      };
-    } else {
-      return {
-        exitCode: 1,
-        stdout: `
-FAIL src/components/Header.test.tsx
-  Header Component
-    ✓ should render logo (12 ms)
-    ✓ should contain sign up button (5 ms)
-    ✕ should be positioned above Hero (24 ms)
-
-  ● Header Component › should be positioned above Hero
-
-    Expected element to be visible, but it was obscured by <div class="hero">.
-    Ensure z-index is set correctly.
-
-      22 |     render(<Header />);
-      23 |     render(<Hero />);
-    > 24 |     expect(screen.getByText('Sign Up')).toBeVisible();
-         |                                         ^
-      25 |   });
-
-Test Suites: 1 failed, 1 total
-Tests:       1 failed, 2 passed, 3 total
-Snapshots:   0 total
-Time:        1.456 s
-`,
-        stderr: ''
-      };
-    }
-  }
-
-  private handleLs(args: string[]): string {
-      const files = db.getFiles(this.runId);
-      // specific dir?
-      if (args.length > 0) {
-          return files.filter(f => f.path.startsWith(args[0])).map(f => f.path).join('\n');
-      }
-      return 'src\npackage.json\nnext.config.js\nnode_modules\nREADME.md';
-  }
-
-  private handleCat(args: string[]): string {
-      if (args.length === 0) return '';
-      const files = db.getFiles(this.runId);
-      const file = files.find(f => f.path === args[0]);
-      return file ? file.content : `cat: ${args[0]}: No such file or directory`;
-  }
-
-  private handleGit(args: string[]): { stdout: string } {
-      if (args[0] === 'commit') {
-          return { stdout: '[fix/header-z-index 8f2a1d] fix(ui): resolve header z-index issue\n 1 file changed, 1 insertion(+), 1 deletion(-)' };
-      }
-      if (args[0] === 'push') {
-          return { stdout: 'To github.com:demo/broken-app.git\n   8f2a1d..9a2b3c  fix/header-z-index -> fix/header-z-index' };
-      }
-      return { stdout: '' };
   }
 }

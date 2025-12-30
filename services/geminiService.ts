@@ -20,7 +20,7 @@ export const streamArchitectureAdvice = async (
   
   // Fallback for demo if no API key is present
   if (!client) {
-    const mockResponse = "I am the Code-Ocean Navigator Architect. Please configure your API_KEY to enable live reasoning. Based on the logs, I appear to be fixing a visual regression in the navigation component.";
+    const mockResponse = "I am the ForgeLoop Architect. Please configure your API_KEY to enable live reasoning. Based on the logs, I appear to be fixing a visual regression in the navigation component.";
     let buffer = "";
     for (const char of mockResponse) {
       buffer += char;
@@ -34,7 +34,7 @@ export const streamArchitectureAdvice = async (
   const recentLogs = contextLogs.slice(-20).map(log => `[${log.timestamp}] [${log.subsystem}] ${log.message}`).join('\n');
   
   const systemInstruction = `
-    You are the "Brain" of the Code-Ocean Navigator, an autonomous AI software engineer.
+    You are the "Brain" of ForgeLoop, an autonomous AI software engineer.
     You are currently executing a fix on a repository.
     The user is asking you questions about your current thought process or the state of the build.
     
@@ -49,7 +49,7 @@ export const streamArchitectureAdvice = async (
 
   try {
     const chat = client.chats.create({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       config: {
         systemInstruction,
       },

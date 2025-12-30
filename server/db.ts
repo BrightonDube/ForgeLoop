@@ -1,19 +1,22 @@
-import { AgentPhase } from '../types';
-import type { Run, LogEntry, Artifact, RepoFile, Issue } from '../types';
 
-/**
- * Mocks a Relational Database with persistence.
- * Uses LocalStorage to act as the "Disk".
- */
-class Database {
-  private static STORAGE_KEY = 'code_ocean_db_v3';
+import { AgentPhase } from '../types';
+import type { Run, LogEntry, Artifact, RepoFile, Issue, RepoSummary, ThoughtSignature, VerificationArtifact, ConfidenceEvent } from '../types';
+
+export class Database {
+  private static STORAGE_KEY = 'forgeloop_db_v3';
   
   private data: {
     runs: Run[];
     logs: LogEntry[];
     artifacts: Artifact[];
-    files: Record<string, RepoFile[]>; // runId -> files
+    files: Record<string, RepoFile[]>; 
     issues: Issue[];
+    repoSummaries: Record<string, RepoSummary>;
+    
+    // PRD: Thought Store Tables
+    thoughts: ThoughtSignature[];
+    verificationArtifacts: VerificationArtifact[];
+    confidenceEvents: ConfidenceEvent[];
   };
 
   constructor() {
@@ -21,35 +24,34 @@ class Database {
   }
 
   private load() {
-    try {
-      const stored = localStorage.getItem(Database.STORAGE_KEY);
-      return stored ? JSON.parse(stored) : { runs: [], logs: [], artifacts: [], files: {}, issues: [] };
-    } catch (e) {
-      return { runs: [], logs: [], artifacts: [], files: {}, issues: [] };
-    }
+    return { 
+        runs: [], 
+        logs: [], 
+        artifacts: [], 
+        files: {}, 
+        issues: [], 
+        repoSummaries: {},
+        thoughts: [],
+        verificationArtifacts: [],
+        confidenceEvents: []
+    };
   }
 
-  private save() {
-    try {
-      localStorage.setItem(Database.STORAGE_KEY, JSON.stringify(this.data));
-    } catch (e) {
-      console.error("Database save failed", e);
-    }
-  }
-
-  // --- Runs Table ---
+  // --- Runs ---
   
-  public createRun(repoUrl: string): Run {
+  public createRun(owner: string, repo: string): Run {
     const run: Run = {
       id: crypto.randomUUID(),
-      repoUrl,
+      repoOwner: owner,
+      repoName: repo,
+      branch: 'main',
       status: 'running',
-      currentPhase: AgentPhase.INGESTION,
+      currentPhase: AgentPhase.BOOTING,
+      currentConfidence: 0.2, // Base confidence as per PRD
       createdAt: Date.now(),
     };
-    this.data.runs.push(run);
-    this.data.files[run.id] = []; // Initialize file store for run
-    this.save();
+    this.data.runs = [run]; 
+    this.data.files[run.id] = []; 
     return run;
   }
 
@@ -59,14 +61,11 @@ class Database {
 
   public updateRun(id: string, updates: Partial<Run>) {
     const run = this.getRun(id);
-    if (run) {
-      Object.assign(run, updates);
-      this.save();
-    }
+    if (run) Object.assign(run, updates);
     return run;
   }
 
-  // --- Logs Table ---
+  // --- Logs (Legacy/UI) ---
 
   public createLog(entry: Omit<LogEntry, 'id' | 'timestamp'>): LogEntry {
     const log: LogEntry = {
@@ -75,7 +74,6 @@ class Database {
       ...entry,
     };
     this.data.logs.push(log);
-    this.save();
     return log;
   }
 
@@ -83,7 +81,40 @@ class Database {
     return this.data.logs.filter(l => l.runId === runId);
   }
 
-  // --- Artifacts Table ---
+  // --- Thought Store (PRD) ---
+
+  public createThought(thought: Omit<ThoughtSignature, 'id' | 'createdAt'>): ThoughtSignature {
+      const t: ThoughtSignature = {
+          id: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          ...thought
+      };
+      this.data.thoughts.push(t);
+      return t;
+  }
+
+  public getThoughts(runId: string): ThoughtSignature[] {
+      return this.data.thoughts.filter(t => t.runId === runId);
+  }
+
+  public addVerificationArtifact(artifact: Omit<VerificationArtifact, 'id' | 'createdAt'>): VerificationArtifact {
+      const a: VerificationArtifact = {
+          id: crypto.randomUUID(),
+          createdAt: Date.now(),
+          ...artifact
+      };
+      this.data.verificationArtifacts.push(a);
+      return a;
+  }
+
+  public addConfidenceEvent(event: Omit<ConfidenceEvent, 'id'>) {
+      this.data.confidenceEvents.push({
+          id: crypto.randomUUID(),
+          ...event
+      });
+  }
+
+  // --- Artifacts (Legacy UI mapping) ---
 
   public createArtifact(artifact: Omit<Artifact, 'id' | 'createdAt'>): Artifact {
     const newArtifact: Artifact = {
@@ -92,7 +123,6 @@ class Database {
       ...artifact
     };
     this.data.artifacts.push(newArtifact);
-    this.save();
     return newArtifact;
   }
 
@@ -100,29 +130,25 @@ class Database {
     return this.data.artifacts.filter(a => a.runId === runId);
   }
 
-  // --- Files Table (Virtual File System) ---
+  // --- Files ---
 
-  public upsertFile(runId: string, file: Omit<RepoFile, 'lastModified'>) {
-    if (!this.data.files[runId]) {
-        this.data.files[runId] = [];
-    }
+  public upsertFile(runId: string, file: RepoFile) {
+    if (!this.data.files[runId]) this.data.files[runId] = [];
     
-    const existingIndex = this.data.files[runId].findIndex(f => f.path === file.path);
-    const newFile: RepoFile = { ...file, lastModified: Date.now() };
-
-    if (existingIndex >= 0) {
-        this.data.files[runId][existingIndex] = newFile;
+    const idx = this.data.files[runId].findIndex(f => f.path === file.path);
+    if (idx >= 0) {
+        this.data.files[runId][idx] = file;
     } else {
-        this.data.files[runId].push(newFile);
+        this.data.files[runId][idx] = file; // Wait, push if not found
+        this.data.files[runId].push(file);
     }
-    this.save();
   }
 
   public getFiles(runId: string): RepoFile[] {
     return this.data.files[runId] || [];
   }
 
-  // --- Issues Table ---
+  // --- Issues ---
   
   public createIssue(issue: Omit<Issue, 'id'>): Issue {
     const newIssue: Issue = {
@@ -130,7 +156,6 @@ class Database {
         ...issue
     };
     this.data.issues.push(newIssue);
-    this.save();
     return newIssue;
   }
 
@@ -140,16 +165,13 @@ class Database {
 
   public updateIssue(id: string, updates: Partial<Issue>) {
       const issue = this.data.issues.find(i => i.id === id);
-      if (issue) {
-          Object.assign(issue, updates);
-          this.save();
-      }
+      if (issue) Object.assign(issue, updates);
       return issue;
   }
 
-  public clear() {
-    this.data = { runs: [], logs: [], artifacts: [], files: {}, issues: [] };
-    this.save();
+  // --- Repo Summary (Architecture Memory) ---
+  public saveRepoSummary(runId: string, summary: RepoSummary) {
+      this.data.repoSummaries[runId] = summary;
   }
 }
 
