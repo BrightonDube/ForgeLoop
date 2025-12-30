@@ -114,6 +114,18 @@ export class DockerManager {
     };
   }
 
+  async executeDetached(containerId: string, cmd: string[]): Promise<void> {
+    const container = this.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdout: false,
+      AttachStderr: false,
+      Detach: true,
+    });
+
+    await exec.start({ hijack: false, stdin: false, Detach: true });
+  }
+
   async copyToContainer(containerId: string, sourcePath: string, destPath: string): Promise<void> {
     const srcAbs = path.resolve(sourcePath);
     const stats = fs.statSync(srcAbs);
@@ -159,6 +171,21 @@ export class DockerManager {
     });
 
     return Buffer.concat(chunks).toString('utf8');
+  }
+
+  async getMappedHostPort(containerId: string, containerPort: number): Promise<number | null> {
+    const inspect = await this.getContainer(containerId).inspect();
+    const key = `${containerPort}/tcp`;
+    const ports = inspect?.NetworkSettings?.Ports as
+      | Record<string, Array<{ HostIp: string; HostPort: string }> | null>
+      | undefined;
+
+    const bindings = ports?.[key];
+    if (!bindings || bindings.length === 0) return null;
+    const hostPort = bindings[0]?.HostPort;
+    if (!hostPort) return null;
+    const parsed = Number(hostPort);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   async healthCheck(containerId: string): Promise<boolean> {
