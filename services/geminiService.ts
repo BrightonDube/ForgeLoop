@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { LogEntry } from "../types";
+import { buildArchitectureAdviceSystemInstruction, formatRecentLogs } from "./geminiPrompts";
 
 // Initialize the Gemini client
 const getClient = () => {
@@ -31,21 +32,8 @@ export const streamArchitectureAdvice = async (
   }
 
   // Construct context from logs
-  const recentLogs = contextLogs.slice(-20).map(log => `[${log.timestamp}] [${log.subsystem}] ${log.message}`).join('\n');
-  
-  const systemInstruction = `
-    You are the "Brain" of ForgeLoop, an autonomous AI software engineer.
-    You are currently executing a fix on a repository.
-    The user is asking you questions about your current thought process or the state of the build.
-    
-    Here are the recent execution logs from your system:
-    ${recentLogs}
-    
-    Answer the user's question concisely, acting as the system architect. 
-    Explain your reasoning based on the logs provided.
-    If the logs show a failure, explain why.
-    If the logs show success, celebrate briefly.
-  `;
+  const recentLogs = formatRecentLogs(contextLogs, 20);
+  const systemInstruction = buildArchitectureAdviceSystemInstruction({ recentLogs });
 
   try {
     const chat = client.chats.create({
