@@ -17,9 +17,11 @@
     "clsx": "^2.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/dockerode": "^3.3.38",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "playwright": "^1.55.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
