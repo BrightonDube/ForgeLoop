@@ -11,6 +11,8 @@
   "dependencies": {
     "@google/genai": "^1.34.0",
     "dockerode": "^4.0.6",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "react-dom": "^19.2.3",
     "react": "^19.2.3",
     "lucide-react": "^0.562.0",
@@ -20,6 +22,7 @@
     "@playwright/test": "^1.55.0",
     "@types/dockerode": "^3.3.38",
     "@types/node": "^22.14.0",
+    "@types/pixelmatch": "^5.2.6",
     "@vitejs/plugin-react": "^5.0.0",
     "playwright": "^1.55.0",
     "typescript": "~5.8.2",
