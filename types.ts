@@ -22,9 +22,12 @@ export type LogSubsystem = 'BRAIN' | 'HANDS' | 'EYES' | 'SYSTEM';
 export interface Run {
   id: string;
   repoUrl: string;
+  repoOwner?: string;
+  repoName?: string;
   status: 'running' | 'completed' | 'failed' | 'stopped';
   currentPhase: AgentPhase;
   createdAt: number;
+  updatedAt?: number;
 }
 
 export interface LogEntry {
@@ -39,8 +42,8 @@ export interface LogEntry {
 export interface Artifact {
   id: string;
   runId: string;
-  type: 'diff' | 'pr' | 'context';
-  data: any;
+  type: 'diff' | 'pr' | 'context' | 'analysis';
+  data: Record<string, unknown>;
   createdAt: number;
 }
 
@@ -48,7 +51,9 @@ export interface RepoFile {
   path: string;
   content: string;
   language: string;
-  lastModified: number;
+  size?: number;
+  sha?: string;
+  lastModified?: number;
   isPatched?: boolean;
 }
 
