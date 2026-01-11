@@ -7,6 +7,14 @@ import { db } from './db.js';
 import { AgentWorker } from './services/agent.js';
 import { GitHubService } from './services/github.js';
 import { GeminiService } from './services/gemini.js';
+import { 
+  rateLimitMiddleware, 
+  analysisRateLimitMiddleware, 
+  validateRepoUrl, 
+  validateRunId, 
+  validateChatMessage,
+  requestLogger 
+} from './middleware/validation.js';
 import type { StartRunRequest, RunStateResponse, WSMessage } from './types.js';
 
 // Initialize Express app
@@ -17,7 +25,9 @@ app.use(cors({
   origin: config.corsOrigins,
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(requestLogger);
+app.use(rateLimitMiddleware);
 
 // Active workers map
 const activeWorkers: Map<string, AgentWorker> = new Map();
@@ -43,16 +53,11 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // --- Runs API ---
 
 // Start a new run
-app.post('/api/runs', async (req: Request, res: Response, next: NextFunction) => {
+app.post('/api/runs', validateRepoUrl, analysisRateLimitMiddleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { repoUrl } = req.body as StartRunRequest;
 
-    if (!repoUrl) {
-      res.status(400).json({ error: 'repoUrl is required' });
-      return;
-    }
-
-    // Parse repo URL
+    // Parse repo URL (already validated by middleware)
     const github = new GitHubService();
     const parsed = github.parseRepoUrl(repoUrl);
 
@@ -101,7 +106,7 @@ app.post('/api/runs', async (req: Request, res: Response, next: NextFunction) =>
 });
 
 // Get run state
-app.get('/api/runs/:id', (req: Request, res: Response) => {
+app.get('/api/runs/:id', validateRunId, (req: Request, res: Response) => {
   const { id } = req.params;
   const run = db.getRun(id);
 
@@ -122,7 +127,7 @@ app.get('/api/runs/:id', (req: Request, res: Response) => {
 });
 
 // Stop a run
-app.post('/api/runs/:id/stop', (req: Request, res: Response) => {
+app.post('/api/runs/:id/stop', validateRunId, (req: Request, res: Response) => {
   const { id } = req.params;
   const worker = activeWorkers.get(id);
 
@@ -149,14 +154,9 @@ app.get('/api/runs', (_req: Request, res: Response) => {
 
 // --- Chat API ---
 
-app.post('/api/chat', async (req: Request, res: Response, next: NextFunction) => {
+app.post('/api/chat', validateChatMessage, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { message, runId } = req.body;
-
-    if (!message) {
-      res.status(400).json({ error: 'message is required' });
-      return;
-    }
 
     const gemini = new GeminiService();
     
