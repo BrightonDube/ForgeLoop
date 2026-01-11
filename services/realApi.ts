@@ -129,6 +129,13 @@ class ApiClient {
     return response.runs;
   }
 
+  async deleteRun(runId: string): Promise<boolean> {
+    const response = await this.fetch<{ success: boolean }>(`/api/runs/${runId}`, {
+      method: 'DELETE',
+    });
+    return response.success;
+  }
+
   // --- Validation ---
 
   async validateRepo(repoUrl: string): Promise<ValidateRepoResponse> {

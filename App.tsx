@@ -5,6 +5,8 @@ import { PhaseTracker } from './components/PhaseTracker';
 import { ChatInterface } from './components/ChatInterface';
 import { FileExplorer } from './components/FileExplorer'; 
 import { IssueList } from './components/IssueList';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ExportButton } from './components/ExportButton';
 import { api as simulatedApi } from './server/api';
 import { api as realApi } from './services/realApi';
 import { AgentPhase, LogEntry, VisualDiffState, Run, RepoFile, Issue } from './types';
@@ -145,6 +147,10 @@ function App() {
              >
                 <MessageSquare className="w-4 h-4" />
             </button>
+            <ExportButton 
+              data={{ run: runData, logs, issues, files }}
+              disabled={!runData}
+            />
             <div className="h-6 w-px bg-ocean-700 mx-1"></div>
             {!isRunning ? (
                 <button 
@@ -173,6 +179,7 @@ function App() {
       </header>
 
       {/* Main Content */}
+      <ErrorBoundary>
       <main className="pt-20 px-6 pb-6 h-screen flex flex-col gap-6">
         
         {/* Top Row: Phase Tracker */}
@@ -277,6 +284,7 @@ function App() {
             </div>
         </div>
       </main>
+      </ErrorBoundary>
 
       {/* Chat Drawer */}
       <ChatInterface logs={logs} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />

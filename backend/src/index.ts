@@ -152,6 +152,32 @@ app.get('/api/runs', (_req: Request, res: Response) => {
   res.json({ runs });
 });
 
+// Delete a run
+app.delete('/api/runs/:id', validateRunId, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    // Stop if running
+    const worker = activeWorkers.get(id);
+    if (worker) {
+      worker.stop();
+      activeWorkers.delete(id);
+    }
+    
+    const deleted = db.deleteRun(id);
+    
+    if (!deleted) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+    
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Error deleting run:', error);
+    res.status(500).json({ error: 'Failed to delete run' });
+  }
+});
+
 // --- Chat API ---
 
 app.post('/api/chat', validateChatMessage, async (req: Request, res: Response, next: NextFunction) => {
