@@ -4,25 +4,33 @@ import { VisualDiffViewer } from './components/VisualDiffViewer';
 import { PhaseTracker } from './components/PhaseTracker';
 import { ChatInterface } from './components/ChatInterface';
 import { FileExplorer } from './components/FileExplorer'; 
-import { IssueList } from './components/IssueList'; // Import IssueList
-import { api } from './server/api';
+import { IssueList } from './components/IssueList';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ExportButton } from './components/ExportButton';
+import { api as simulatedApi } from './server/api';
+import { api as realApi } from './services/realApi';
 import { AgentPhase, LogEntry, VisualDiffState, Run, RepoFile, Issue } from './types';
-import { Play, Square, Github, MessageSquare, Activity, Cpu, Database as DbIcon, Code2, Terminal, AlertCircle } from 'lucide-react';
+import { Play, Square, Github, MessageSquare, Activity, Cpu, Database as DbIcon, Code2, Terminal, AlertCircle, Loader2, Check, X } from 'lucide-react';
 import clsx from 'clsx';
 
-const REPO_URL = "github.com/demo/broken-app";
+// Configuration
+const USE_REAL_BACKEND = import.meta.env.VITE_USE_REAL_BACKEND === 'true';
+const api = USE_REAL_BACKEND ? realApi : simulatedApi;
 const POLL_INTERVAL = 500;
 
 function App() {
   // Application State
+  const [repoUrl, setRepoUrl] = useState<string>('');
+  const [repoValidation, setRepoValidation] = useState<{ valid: boolean; message: string } | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [runData, setRunData] = useState<Run | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [files, setFiles] = useState<RepoFile[]>([]); 
-  const [issues, setIssues] = useState<Issue[]>([]); // New state for issues
+  const [issues, setIssues] = useState<Issue[]>([]);
   const [visualDiff, setVisualDiff] = useState<VisualDiffState>({ beforeUrl: null, afterUrl: null, detectedIssues: [] });
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<'logs' | 'files' | 'issues'>('logs'); // Added 'issues' tab
+  const [leftTab, setLeftTab] = useState<'logs' | 'files' | 'issues'>('logs');
 
   // Polling Mechanism (Simulating Socket/Server Push)
   useEffect(() => {
@@ -53,17 +61,24 @@ function App() {
   }, [activeRunId]);
 
   const handleStart = async () => {
+    if (!repoUrl.trim()) {
+      setRepoValidation({ valid: false, message: 'Please enter a repository URL' });
+      return;
+    }
+    
     try {
         setLogs([]);
         setFiles([]);
         setIssues([]);
         setVisualDiff({ beforeUrl: null, afterUrl: null, detectedIssues: [] });
-        const newRun = await api.startRun(REPO_URL);
+        const targetUrl = repoUrl.trim() || 'github.com/demo/broken-app';
+        const newRun = await api.startRun(targetUrl);
         setRunData(newRun);
         setActiveRunId(newRun.id);
         setLeftTab('logs');
     } catch (e) {
         console.error("Failed to start run", e);
+        setRepoValidation({ valid: false, message: `Failed to start: ${e}` });
     }
   };
 
@@ -87,16 +102,38 @@ function App() {
                 <Activity className="w-5 h-5 text-white" />
             </div>
             <div>
-                <h1 className="font-bold text-lg tracking-tight">Code-Ocean Navigator</h1>
-                <p className="text-xs text-ocean-400 font-mono">Full-Stack Autonomous Agent v3.1</p>
+                <h1 className="font-bold text-lg tracking-tight">ForgeLoop</h1>
+                <p className="text-xs text-ocean-400 font-mono">
+                  {USE_REAL_BACKEND ? 'Real Backend Mode' : 'Simulation Mode'}
+                </p>
             </div>
         </div>
 
-        <div className="flex items-center gap-4 bg-ocean-800 py-1.5 px-3 rounded-full border border-ocean-700">
-            <Github className="w-4 h-4 text-ocean-500" />
-            <span className="text-xs text-ocean-300 font-mono">{REPO_URL}</span>
-            <div className="h-4 w-px bg-ocean-600"></div>
-            <span className="text-xs text-ocean-400">Next.js • Node.js • Postgres (Sim)</span>
+        <div className="flex items-center gap-2 flex-1 max-w-xl mx-6">
+            <Github className="w-5 h-5 text-ocean-400 shrink-0" />
+            <input
+              type="text"
+              value={repoUrl}
+              onChange={(e) => {
+                setRepoUrl(e.target.value);
+                setRepoValidation(null);
+              }}
+              placeholder="Enter GitHub repo URL (e.g., owner/repo)"
+              disabled={isRunning}
+              className={clsx(
+                "flex-1 bg-ocean-800 border rounded-md px-3 py-1.5 text-sm font-mono text-ocean-100 placeholder:text-ocean-600 focus:outline-none focus:ring-2 focus:ring-neon-blue/50 transition-all",
+                isRunning ? "opacity-50 cursor-not-allowed" : "",
+                repoValidation?.valid === false ? "border-neon-red" : "border-ocean-700"
+              )}
+            />
+            {repoValidation && (
+              <span className={clsx(
+                "text-xs shrink-0",
+                repoValidation.valid ? "text-neon-green" : "text-neon-red"
+              )}>
+                {repoValidation.valid ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+              </span>
+            )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -110,14 +147,24 @@ function App() {
              >
                 <MessageSquare className="w-4 h-4" />
             </button>
+            <ExportButton 
+              data={{ run: runData, logs, issues, files }}
+              disabled={!runData}
+            />
             <div className="h-6 w-px bg-ocean-700 mx-1"></div>
             {!isRunning ? (
                 <button 
                     onClick={handleStart}
-                    className="flex items-center gap-2 bg-neon-blue hover:bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-lg shadow-neon-blue/20"
+                    disabled={!repoUrl.trim()}
+                    className={clsx(
+                      "flex items-center gap-2 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-lg",
+                      repoUrl.trim() 
+                        ? "bg-neon-blue hover:bg-blue-600 shadow-neon-blue/20" 
+                        : "bg-ocean-700 cursor-not-allowed opacity-50"
+                    )}
                 >
                     <Play className="w-4 h-4" />
-                    Start Mission
+                    Analyze
                 </button>
             ) : (
                 <button 
@@ -132,6 +179,7 @@ function App() {
       </header>
 
       {/* Main Content */}
+      <ErrorBoundary>
       <main className="pt-20 px-6 pb-6 h-screen flex flex-col gap-6">
         
         {/* Top Row: Phase Tracker */}
@@ -236,6 +284,7 @@ function App() {
             </div>
         </div>
       </main>
+      </ErrorBoundary>
 
       {/* Chat Drawer */}
       <ChatInterface logs={logs} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
